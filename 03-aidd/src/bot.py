@@ -1,13 +1,33 @@
 import asyncio
+import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from config import TELEGRAM_BOT_TOKEN, OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_URL
+from config import TELEGRAM_BOT_TOKEN, OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_URL, HISTORY_LEN
+from logger import setup_logging
 import httpx
 
-async def start_handler(message: types.Message):
-    await message.answer("Привет! Я фитнес-бот. Задай любой вопрос, и я помогу тебе как персональный тренер.")
+# Глобальное хранилище контекста пользователей
+user_contexts = {}
 
-async def ask_llm(message_text: str) -> str:
+async def start_handler(message: types.Message):
+    welcome_text = (
+        "👋 Привет! Я — твой персональный тренер по фитнесу.\n\n"
+        "Задавай мне любые вопросы о тренировках, питании, упражнениях — "
+        "и я помогу тебе достичь твоих фитнес-целей!\n\n"
+        "📋 Доступные команды:\n"
+        "/start — показать это сообщение\n"
+        "/clear — очистить историю диалога\n\n"
+        "Просто напиши свой вопрос, и я отвечу! 💪"
+    )
+    await message.answer(welcome_text)
+
+async def clear_handler(message: types.Message):
+    user_id = message.from_user.id
+    if user_id in user_contexts:
+        user_contexts[user_id] = []
+    await message.answer("История диалога очищена.")
+
+async def ask_llm(message_text: str, user_id: int) -> str:
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -15,12 +35,20 @@ async def ask_llm(message_text: str) -> str:
         "X-Title": "FitnessTelegramBot",
         "Content-Type": "application/json"
     }
+    
+    # Получаем историю пользователя
+    history = user_contexts.get(user_id, [])
+    
+    # Формируем messages: system + история + новое сообщение
+    messages = [
+        {"role": "system", "content": "Ты — персональный тренер по фитнесу. Отвечай кратко, понятно и профессионально."}
+    ]
+    messages.extend(history)
+    messages.append({"role": "user", "content": message_text})
+    
     json_data = {
         "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": "Ты — персональный тренер по фитнесу. Отвечай кратко, понятно и профессионально."},
-            {"role": "user", "content": message_text}
-        ]
+        "messages": messages
     }
     try:
         print(f"Request URL: {OPENROUTER_URL}")
@@ -46,30 +74,52 @@ async def ask_llm(message_text: str) -> str:
             return data["choices"][0]["message"]["content"]
     
     except httpx.HTTPStatusError as e:
-        print(f"LLM HTTP Status Error: {e.response.status_code}")
+        logging.error(f"LLM HTTP Status Error: {e.response.status_code}")
         print(f"Response text: {e.response.text[:500]}")
         return "Извините, не удалось получить ответ. Попробуйте позже."
 
     except Exception as e:
-        print(f"LLM Error: {e}")
+        logging.error(f"LLM Error: {e}")
         import traceback
         traceback.print_exc()
         return "Извините, не удалось получить ответ. Попробуйте позже."
 
     
 async def llm_handler(message: types.Message):
+    user_id = message.from_user.id
+    
     try:
-        reply = await ask_llm(message.text)
+        reply = await ask_llm(message.text, user_id)
+        
+        # Сохраняем в историю: вопрос пользователя и ответ ассистента
+        if user_id not in user_contexts:
+            user_contexts[user_id] = []
+        
+        user_contexts[user_id].append({"role": "user", "content": message.text})
+        user_contexts[user_id].append({"role": "assistant", "content": reply})
+        
+        # Обрезаем историю до последних N пар (user+assistant)
+        max_messages = HISTORY_LEN * 2
+        if len(user_contexts[user_id]) > max_messages:
+            user_contexts[user_id] = user_contexts[user_id][-max_messages:]
+        
     except Exception as e:
-        print("LLM Error:", e)
+        logging.error(f"LLM Handler Error: {e}")
         reply = "Извините, не удалось получить ответ. Попробуйте позже."
+    
     await message.answer(reply)
 
 async def main():
+    setup_logging()
+    logging.info("Бот запускается...")
+    
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     dp = Dispatcher()
     dp.message.register(start_handler, Command(commands=["start"]))
+    dp.message.register(clear_handler, Command(commands=["clear"]))
     dp.message.register(llm_handler)
+    
+    logging.info("Бот запущен и готов к работе (polling)")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
