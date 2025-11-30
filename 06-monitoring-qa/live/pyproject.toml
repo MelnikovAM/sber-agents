@@ -1,0 +1,25 @@
+[project]
+name = "telegram-llm-bot"
+version = "0.1.0"
+description = "Simple Telegram bot with LLM integration"
+requires-python = ">=3.11"
+dependencies = [
+    "aiogram>=3.15.0",
+    "openai>=1.54.0",
+    "python-dotenv>=1.0.0",
+    "langchain>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-community>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-text-splitters>=0.3.0",
+    "pypdf>=5.0.0",
+    "langsmith>=0.1.0",
+    "jq>=1.0.0",
+    "ragas>=0.2.0",
+    "datasets>=3.0.0",
+    "langchain-huggingface>=0.1.0",  # Интеграция HuggingFace с LangChain
+    "sentence-transformers>=3.0.0",  # Модели embeddings
+    "torch>=2.0.0,<2.3.0",  # Явно указываем совместимую версию для macOS x86_64 (Intel)
+    "numpy>=1.24.0,<2.0.0",  # PyTorch 2.2.x требует numpy 1.x
+    "einops>=0.8.0",  # Требуется для nomic-ai embeddings
+]
